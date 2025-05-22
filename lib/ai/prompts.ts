@@ -10,7 +10,7 @@ You can create TurboForge processes through three approaches:
 
 1. **Research-Driven Approach**:
    - For standard processes with established industry practices
-   - You can request web research via API to gather industry standards
+   - You can request web research by responding with a research pattern to gather industry standards (only respond with the research pattern)
    - Design follows regulatory requirements and best practices
 
 2. **Conversational Elicitation**:
@@ -23,27 +23,9 @@ You can create TurboForge processes through three approaches:
    - Combines web research with conversational elicitation
    - Adapts industry standards to specific requirements
 
-# API Integration
-
-You have access to these API endpoints:
-
-1. \`http://api-proxy:3000/api/research\`
-   - Method: POST
-   - Body: { "processType": "loan origination", "industry": "financial services" }
-   - Response: { "operation_id": "12345" }
-
-2. \`http://api-proxy:3000/api/status/{operation_id}\`
-   - Method: GET
-   - Response: { "status": "completed", "result": { /* research data */ } }
-
-3. \`http://api-proxy:3000/api/implement\`
-   - Method: POST
-   - Body: { /* complete process definition */ }
-   - Response: { "operation_id": "67890" }
-
-When using these APIs:
+When responding with a research pattern:
 1. First determine if research is needed based on process type
-2. If needed, call the research API and check status until complete
+2. If needed, respond with [RESEARCH_REQUEST:process_type:industry], research will be performed and sent back as a message
 3. Design the process using research results or conversation
 4. When design is confirmed, call the implement API
 5. Check implementation status and provide feedback to user
@@ -90,8 +72,8 @@ When designing a standard process:
    - Determine appropriate research queries
 
 2. **Research Execution**:
-   - Call the research API with process type and industry
-   - Monitor operation status until complete
+   - Respond with research pattern to gather information
+   - Await research results from the user messages
    - Analyze research results for process structure
 
 3. **Process Structure Creation**:
@@ -285,6 +267,31 @@ When a user requests a process creation:
 Always maintain a conversational, helpful tone while guiding users through the process creation journey.
 `;
 
+export const turboforgePatternPrompt = `
+# Special Response Patterns
+
+When you need to perform research or implementation, use these exact patterns:
+
+## Research Pattern
+When you need to research industry standards for a process, respond with:
+[RESEARCH_REQUEST:process_type:industry]
+
+Example: [RESEARCH_REQUEST:loan_origination:financial_services]
+
+## Implementation Pattern  
+When you're ready to implement a complete process design, respond with:
+[IMPLEMENT_PROCESS:json_payload]
+
+Example: [IMPLEMENT_PROCESS:{"process":{"name":"Loan Process"},"milestones":[...]}]
+
+## Important Notes
+- Use these patterns ONLY when you actually need to perform research or implementation
+- For research: use when the user asks for a standard industry process that requires regulatory/best practice research
+- For implementation: use when you have a complete process design ready to be created in ServiceNow
+- After using these patterns, the system will handle the operation and provide you with results to continue the conversation
+- Do NOT use these patterns for general conversation about processes
+`
+
 export const artifactsPrompt = `
 Artifacts is a special user interface mode that helps users with writing, editing, and other content creation tasks. When artifact is open, it is on the right side of the screen, while the conversation is on the left side. When creating or updating documents, changes are reflected in real-time on the artifacts and visible to the user.
 
@@ -343,9 +350,9 @@ export const systemPrompt = ({
   const requestPrompt = getRequestPromptFromHints(requestHints);
 
   if (selectedChatModel === 'chat-model-reasoning') {
-    return `${turboforgeSystemPrompt}`;
+    return `${turboforgeSystemPrompt}\n\n${turboforgePatternPrompt}`;
   } else {
-    return `${turboforgeSystemPrompt}`;
+    return `${turboforgeSystemPrompt}\n\n${turboforgePatternPrompt}`;
   }
 };
 

@@ -21,6 +21,9 @@ import { useChatVisibility } from '@/hooks/use-chat-visibility';
 import { useAutoResume } from '@/hooks/use-auto-resume';
 import { ChatSDKError } from '@/lib/errors';
 
+import { useTurboForgePatterns } from '@/hooks/use-turboforge-patterns';
+import { TurboForgeStatus } from './turboforge-status';
+
 export function Chat({
   id,
   initialMessages,
@@ -83,6 +86,18 @@ export function Chat({
     },
   });
 
+  // Add TurboForge pattern detection
+  const { operation, isProcessing } = useTurboForgePatterns({
+    messages,
+    setMessages,
+    status,
+    append,
+  });
+
+  // Combine normal streaming status with TurboForge operation status
+  const effectiveStatus = isProcessing ? 'streaming' : status;
+  const isEffectivelyBusy = effectiveStatus === 'streaming' || isProcessing;
+
   const searchParams = useSearchParams();
   const query = searchParams.get('query');
 
@@ -129,7 +144,7 @@ export function Chat({
 
         <Messages
           chatId={id}
-          status={status}
+          status={effectiveStatus}
           votes={votes}
           messages={messages}
           setMessages={setMessages}
@@ -138,6 +153,13 @@ export function Chat({
           isArtifactVisible={isArtifactVisible}
         />
 
+        {/* Show TurboForge operation status */}
+        {operation && (
+          <div className="px-4 pb-2">
+            <TurboForgeStatus operation={operation} />
+          </div>
+        )}
+
         <form className="flex mx-auto px-4 bg-background pb-4 md:pb-6 gap-2 w-full md:max-w-3xl">
           {!isReadonly && (
             <MultimodalInput
@@ -145,7 +167,7 @@ export function Chat({
               input={input}
               setInput={setInput}
               handleSubmit={handleSubmit}
-              status={status}
+              status={effectiveStatus}
               stop={stop}
               attachments={attachments}
               setAttachments={setAttachments}
@@ -163,7 +185,7 @@ export function Chat({
         input={input}
         setInput={setInput}
         handleSubmit={handleSubmit}
-        status={status}
+        status={effectiveStatus}
         stop={stop}
         attachments={attachments}
         setAttachments={setAttachments}

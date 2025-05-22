@@ -25,6 +25,13 @@ export const postRequestBodySchema = z.object({
   }),
   selectedChatModel: z.enum(['chat-model', 'chat-model-reasoning']),
   selectedVisibilityType: z.enum(['public', 'private']),
+  // Add data field for TurboForge operations
+  data: z.object({
+    turboforgeOperation: z.object({
+      type: z.enum(['research', 'implement']),
+      fullResults: z.any(),
+    })
+  }).optional(),
 });
 
 export type PostRequestBody = z.infer<typeof postRequestBodySchema>;

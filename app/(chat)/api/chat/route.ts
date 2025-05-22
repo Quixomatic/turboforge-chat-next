@@ -69,13 +69,14 @@ export async function POST(request: Request) {
   try {
     const json = await request.json();
     requestBody = postRequestBodySchema.parse(json);
-    console.log("[DEBUG] Request body parsed:", JSON.stringify(json, null, 2));
+    console.log("[DEBUG] Request body parsed");
   } catch (_) {
+    console.error("[DEBUG] Error parsing request body:", _);
     return new ChatSDKError("bad_request:api").toResponse();
   }
 
   try {
-    const { id, message, selectedChatModel, selectedVisibilityType } =
+    const { id, message, selectedChatModel, selectedVisibilityType, data } =
       requestBody;
 
     console.log("[DEBUG] Extracted values:", {
@@ -83,13 +84,17 @@ export async function POST(request: Request) {
       messageContent: message.content,
       selectedChatModel,
       selectedVisibilityType,
+      data,
     });
 
     const session = await auth();
-    console.log('[DEBUG] Session obtained:', session ? 'Valid session' : 'No session');
+    console.log(
+      "[DEBUG] Session obtained:",
+      session ? "Valid session" : "No session"
+    );
 
     if (!session?.user) {
-      console.log('[DEBUG] No user session, returning unauthorized');
+      console.log("[DEBUG] No user session, returning unauthorized");
       return new ChatSDKError("unauthorized:chat").toResponse();
     }
 
@@ -124,15 +129,15 @@ export async function POST(request: Request) {
     }
 
     const previousMessages = await getMessagesByChatId({ id });
-    console.log('[DEBUG] Previous messages count:', previousMessages.length);
+    console.log("[DEBUG] Previous messages count:", previousMessages.length);
 
     const messages = appendClientMessage({
       // @ts-expect-error: todo add type conversion from DBMessage[] to UIMessage[]
       messages: previousMessages,
       message,
     });
-    console.log('[DEBUG] Total messages for LLM:', messages.length);
-    console.log('[DEBUG] Last message:', messages[messages.length - 1]);
+    console.log("[DEBUG] Total messages for LLM:", messages.length);
+    console.log("[DEBUG] Last message:", messages[messages.length - 1]);
 
     const { longitude, latitude, city, country } = geolocation(request);
 
@@ -142,6 +147,37 @@ export async function POST(request: Request) {
       city,
       country,
     };
+
+    // Check if this message contains TurboForge operation data
+    let enhancedSystemPrompt = systemPrompt({
+      selectedChatModel,
+      requestHints,
+    });
+
+    if (data?.turboforgeOperation) {
+      console.log(
+        "[DEBUG] TurboForge operation data detected:",
+        data.turboforgeOperation.type
+      );
+
+      if (data.turboforgeOperation.type === "research") {
+        enhancedSystemPrompt += `
+
+IMPORTANT: The user has just completed a research operation. Here are the complete research results:
+
+${JSON.stringify(data.turboforgeOperation.fullResults, null, 2)}
+
+Please analyze these research results and design a complete TurboForge process based on the findings. Use the research data to inform your process design with industry standards and best practices.`;
+      } else if (data.turboforgeOperation.type === "implement") {
+        enhancedSystemPrompt += `
+
+IMPORTANT: A TurboForge process implementation has just completed. Here are the complete implementation results:
+
+${JSON.stringify(data.turboforgeOperation.fullResults, null, 2)}
+
+Please provide a comprehensive summary of what was created, including links and next steps for the user.`;
+      }
+    }
 
     await saveMessages({
       messages: [
@@ -155,45 +191,36 @@ export async function POST(request: Request) {
         },
       ],
     });
-    console.log('[DEBUG] User message saved to database');
+    console.log("[DEBUG] User message saved to database");
 
     const streamId = generateUUID();
     await createStreamId({ streamId, chatId: id });
-    console.log('[DEBUG] Stream ID created:', streamId);
+    console.log("[DEBUG] Stream ID created:", streamId);
 
     const stream = createDataStream({
       execute: (dataStream) => {
-        console.log('[DEBUG] Starting streamText execution', myProvider.languageModel(selectedChatModel));
-        console.log('[DEBUG] System prompt:', systemPrompt({ selectedChatModel, requestHints }));
+        console.log(
+          "[DEBUG] Starting streamText execution",
+          myProvider.languageModel(selectedChatModel)
+        );
+        //console.log('[DEBUG] System prompt:', systemPrompt({ selectedChatModel, requestHints }));
 
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }),
+          // Use enhanced system prompt that includes TurboForge data
+          system: enhancedSystemPrompt,
           messages,
-          maxSteps: 5,
-          experimental_activeTools:
-            selectedChatModel === "chat-model-reasoning"
-              ? []
-              : [
-                  /*"getWeather",
-                  "createDocument",
-                  "updateDocument",
-                  "requestSuggestions",*/
-                ],
+          maxSteps: 5, // Keep at 1 for Ollama
+          experimental_activeTools: [], // Keep disabled for Ollama
           experimental_transform: smoothStream({ chunking: "word" }),
           experimental_generateMessageId: generateUUID,
-          tools: {
-            /*getWeather,
-            createDocument: createDocument({ session, dataStream }),
-            updateDocument: updateDocument({ session, dataStream }),
-            requestSuggestions: requestSuggestions({
-              session,
-              dataStream,
-            }),*/
-          },
+          tools: {}, // Keep empty for Ollama
           onFinish: async ({ response }) => {
-            console.log('[DEBUG] StreamText onFinish called');
-            console.log('[DEBUG] Response messages count:', response.messages.length);
+            console.log("[DEBUG] StreamText onFinish called");
+            console.log(
+              "[DEBUG] Response messages count:",
+              response.messages.length
+            );
 
             if (session.user?.id) {
               try {
@@ -204,7 +231,10 @@ export async function POST(request: Request) {
                 });
 
                 if (!assistantId) {
-                  console.error('[DEBUG] No assistant message ID found', JSON.stringify(response, null, 2));
+                  console.error(
+                    "[DEBUG] No assistant message ID found",
+                    JSON.stringify(response, null, 2)
+                  );
                   throw new Error("No assistant message found!");
                 }
 
@@ -226,9 +256,9 @@ export async function POST(request: Request) {
                     },
                   ],
                 });
-                console.log('[DEBUG] Assistant message saved to database');
+                console.log("[DEBUG] Assistant message saved to database");
               } catch (_) {
-                console.error('[DEBUG] Error saving assistant message:', _);
+                console.error("[DEBUG] Error saving assistant message:", _);
                 console.error("Failed to save chat");
               }
             }
@@ -239,7 +269,7 @@ export async function POST(request: Request) {
           },
         });
 
-        console.log('[DEBUG] StreamText result created, consuming stream');
+        console.log("[DEBUG] StreamText result created, consuming stream");
 
         result.consumeStream();
 
@@ -247,10 +277,10 @@ export async function POST(request: Request) {
           sendReasoning: true,
         });
 
-        console.log('[DEBUG] Stream merged into data stream');
+        console.log("[DEBUG] Stream merged into data stream");
       },
       onError: (error) => {
-        console.error('[DEBUG] DataStream onError called:', error);
+        console.error("[DEBUG] DataStream onError called:", error);
         return "Oops, an error occurred!";
       },
     });
@@ -258,17 +288,20 @@ export async function POST(request: Request) {
     const streamContext = getStreamContext();
 
     if (streamContext) {
-      console.log('[DEBUG] Returning stream response');
+      console.log("[DEBUG] Returning stream response");
       return new Response(
         await streamContext.resumableStream(streamId, () => stream)
       );
     } else {
-      console.log('[DEBUG] Returning stream response');
+      console.log("[DEBUG] Returning stream response");
       return new Response(stream);
     }
   } catch (error) {
-    console.error('[DEBUG] Unhandled error in POST:', error);
-    console.error('[DEBUG] Request body was:', JSON.stringify(requestBody, null, 2));
+    console.error("[DEBUG] Unhandled error in POST:", error);
+    console.error(
+      "[DEBUG] Request body was:",
+      JSON.stringify(requestBody, null, 2)
+    );
 
     if (error instanceof ChatSDKError) {
       return error.toResponse();
